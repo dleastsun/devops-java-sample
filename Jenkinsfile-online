@@ -5,7 +5,7 @@ pipeline {
     }
   }
   parameters {
-    string(name:'TAG_NAME', defaultValue: '', description:'发布版本号，例如 v1.0.0 (留空则不发布正式版)')
+    string(name:'TAG_NAME', defaultValue: '', description:'版本标签，格式 v1.0.0，留空不发布正式环境')
   }
   environment {
     DOCKER_CREDENTIAL_ID = 'dockerhub-id'
@@ -17,94 +17,111 @@ pipeline {
     APP_NAME = 'devops-java-sample'
     SONAR_CREDENTIAL_ID = 'sonar-qube'
   }
+  options {
+    timeout(time: 20, unit: 'MINUTES') // 整体流水线超时保护
+  }
   stages {
-    stage ('checkout scm') {
+    stage('Checkout SCM') {
       steps {
-        sh 'git config --global http.sslVerify false'
-        sh 'git config --global --add core.gitProxy ""'
-        sh 'git config --global http.postBuffer 524288000'
-        checkout(scm)
+        sh '''
+          git config --global http.sslVerify false
+          git config --global http.postBuffer 524288000
+          git config --global core.gitProxy ""
+        '''
+        checkout scm
       }
     }
-    stage ('unit test') {
+
+    stage('Unit Test') {
       steps {
-        container ('maven') {
+        container('maven') {
           sh 'mvn clean -gs `pwd`/configuration/settings.xml test'
         }
       }
     }
 
-    stage ('build & push') {
+    stage('Build & Push Snapshot') {
       steps {
-        container ('maven') {
-          sh 'mvn -Dmaven.test.skip=true -gs `pwd`/configuration/settings.xml clean package'
-          sh 'docker build --pull=false -f Dockerfile-online -t $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:SNAPSHOT-$BRANCH_NAME-$BUILD_NUMBER .'
+        container('maven') {
+          sh '''
+            mvn -Dmaven.test.skip=true -gs `pwd`/configuration/settings.xml clean package
+            docker build --pull=false -f Dockerfile-online -t ${REGISTRY}/${DOCKERHUB_NAMESPACE}/${APP_NAME}:SNAPSHOT-${BRANCH_NAME}-${BUILD_NUMBER} .
+          '''
         }
       }
     }
-    stage('push latest'){
-       when{
-         branch 'master'
-       }
-       steps{
-            container ('maven') {
 
-            }
-       }
-    }
-    stage('deploy to dev') {
-      when{
+    stage('Push Latest Tag (Master Only)') {
+      when {
         branch 'master'
       }
       steps {
-        input(id: 'deploy-to-dev', message: 'deploy to dev?')
-        withCredentials([kubeconfigFile(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG')]) {
-          sh """
-            envsubst < deploy/dev-ol/*.yaml | kubectl apply -f -
-          """
+        container('maven') {
+          // 如需给latest镜像打标签，在这里补充docker tag/push逻辑
         }
       }
     }
-    stage('push with tag'){
-      when{
-        expression{
-          return params.TAG_NAME =~ /v.*/
-        }
+
+    stage('Deploy To Dev') {
+      when {
+        branch 'master'
       }
       steps {
-          container ('maven') {
-            input(id: 'release-image-with-tag', message: 'release image with tag?')
-            withCredentials([usernamePassword(credentialsId: "$GITHUB_CREDENTIAL_ID", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
-              sh 'git config --global user.email "kubesphere@yunify.com" '
-              sh 'git config --global user.name "kubesphere" '
-              sh 'git config --global --add url."https://".insteadOf git://'
-              sh 'git tag -a $TAG_NAME -m "$TAG_NAME" '
-              sh 'git remote set-url origin http://$GIT_USERNAME:$GIT_PASSWORD@github.com/$GITHUB_ACCOUNT/devops-java-sample.git'
-              sh 'git push origin --tags --ipv4'
-            }
-      }
+        input message: 'deploy to dev?', ok: 'Proceed'
+        // kubernetesDeploy 原生插件，读取Jenkins全局凭证，和你历史成功版本一致
+        kubernetesDeploy(
+          configs: 'deploy/dev-ol/**',
+          enableConfigSubstitution: true,
+          kubeconfigId: "${KUBECONFIG_CREDENTIAL_ID}"
+        )
       }
     }
-    stage('deploy to production') {
-      when{
-        expression{
-          return params.TAG_NAME =~ /v.*/
-        }
+
+    stage('Push Git Tag') {
+      when {
+        expression { params.TAG_NAME =~ /^v.+/ }
       }
       steps {
-        input(id: 'deploy-to-production', message: 'deploy to production?')
-        withCredentials([kubeconfigFile(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG')]) {
-          sh """
-            envsubst < deploy/prod-ol/*.yaml | kubectl apply -f -
-          """
+        container('maven') {
+          input message: 'release image with tag?', ok: 'Proceed'
+          withCredentials([usernamePassword(
+            credentialsId: "${GITHUB_CREDENTIAL_ID}",
+            usernameVariable: 'GIT_USERNAME',
+            passwordVariable: 'GIT_PASSWORD'
+          )]) {
+            sh '''
+              git config --global user.email "kubesphere@yunify.com"
+              git config --global user.name "kubesphere"
+              git config --global url."https://".insteadOf git://
+              git tag -a ${TAG_NAME} -m ${TAG_NAME}
+              git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${GITHUB_ACCOUNT}/devops-java-sample.git
+              git push origin --tags
+            '''
+          }
         }
+      }
+    }
+
+    stage('Deploy To Production') {
+      when {
+        expression { params.TAG_NAME =~ /^v.+/ }
+      }
+      steps {
+        input message: 'deploy to production?', ok: 'Proceed'
+        kubernetesDeploy(
+          configs: 'deploy/prod-ol/**',
+          enableConfigSubstitution: true,
+          kubeconfigId: "${KUBECONFIG_CREDENTIAL_ID}"
+        )
       }
     }
   }
+
   post {
     always {
       script {
-        if (env.BUILD_NUMBER && env.NODE_NAME) {
+        // 仅在agent上下文存在时清理工作目录，规避FilePath缺失报错
+        if (env.NODE_NAME && env.BUILD_NUMBER) {
           cleanWs()
         }
       }
