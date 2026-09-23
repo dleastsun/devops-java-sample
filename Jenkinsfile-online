@@ -5,7 +5,7 @@ pipeline {
     }
   }
   parameters {
-    string(name:'TAG_NAME', defaultValue: '', description:'版本标签，格式 v1.0.0，留空不发布正式环境')
+    string(name: 'TAG_NAME', defaultValue: '', description: '版本标签，v1.0.0格式，留空不发布生产')
   }
   environment {
     DOCKER_CREDENTIAL_ID = 'dockerhub-id'
@@ -18,7 +18,7 @@ pipeline {
     SONAR_CREDENTIAL_ID = 'sonar-qube'
   }
   options {
-    timeout(time: 20, unit: 'MINUTES') // 整体流水线超时保护
+    timeout(time: 20, unit: 'MINUTES')
   }
   stages {
     stage('Checkout SCM') {
@@ -40,7 +40,7 @@ pipeline {
       }
     }
 
-    stage('Build & Push Snapshot') {
+    stage('Build Snapshot Image') {
       steps {
         container('maven') {
           sh '''
@@ -57,7 +57,7 @@ pipeline {
       }
       steps {
         container('maven') {
-          // 如需给latest镜像打标签，在这里补充docker tag/push逻辑
+          // 如需docker tag && push latest镜像，在这里补充
         }
       }
     }
@@ -68,16 +68,20 @@ pipeline {
       }
       steps {
         input message: 'deploy to dev?', ok: 'Proceed'
-        // kubernetesDeploy 原生插件，读取Jenkins全局凭证，和你历史成功版本一致
-        kubernetesDeploy(
-          configs: 'deploy/dev-ol/**',
-          enableConfigSubstitution: true,
-          kubeconfigId: "${KUBECONFIG_CREDENTIAL_ID}"
-        )
+        withCredentials([file(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            set -e
+            export KUBECONFIG=${KUBECONFIG_FILE}
+            echo "===== 开始替换变量并应用dev资源 ====="
+            envsubst < deploy/dev-ol/*.yaml | kubectl apply -f -
+            echo "===== 等待deployment滚动就绪 ====="
+            kubectl rollout status deploy -n default --timeout=180s
+          '''
+        }
       }
     }
 
-    stage('Push Git Tag') {
+    stage('Push Git Release Tag') {
       when {
         expression { params.TAG_NAME =~ /^v.+/ }
       }
@@ -90,6 +94,7 @@ pipeline {
             passwordVariable: 'GIT_PASSWORD'
           )]) {
             sh '''
+              set -e
               git config --global user.email "kubesphere@yunify.com"
               git config --global user.name "kubesphere"
               git config --global url."https://".insteadOf git://
@@ -108,11 +113,16 @@ pipeline {
       }
       steps {
         input message: 'deploy to production?', ok: 'Proceed'
-        kubernetesDeploy(
-          configs: 'deploy/prod-ol/**',
-          enableConfigSubstitution: true,
-          kubeconfigId: "${KUBECONFIG_CREDENTIAL_ID}"
-        )
+        withCredentials([file(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            set -e
+            export KUBECONFIG=${KUBECONFIG_FILE}
+            echo "===== 开始替换变量并应用prod资源 ====="
+            envsubst < deploy/prod-ol/*.yaml | kubectl apply -f -
+            echo "===== 等待deployment滚动就绪 ====="
+            kubectl rollout status deploy -n default --timeout=180s
+          '''
+        }
       }
     }
   }
@@ -120,7 +130,6 @@ pipeline {
   post {
     always {
       script {
-        // 仅在agent上下文存在时清理工作目录，规避FilePath缺失报错
         if (env.NODE_NAME && env.BUILD_NUMBER) {
           cleanWs()
         }
