@@ -1,5 +1,4 @@
-FROM docker.m.daocloud.io/library/java:openjdk-8-jre-alpine
-
+FROM eclipse-temurin:8-jre-alpin
 
 WORKDIR /home
 
