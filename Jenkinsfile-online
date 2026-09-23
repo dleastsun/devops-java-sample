@@ -10,7 +10,7 @@ pipeline {
   environment {
     DOCKER_CREDENTIAL_ID = 'dockerhub-id'
     GITHUB_CREDENTIAL_ID = 'github-id'
-    KUBECONFIG_CREDENTIAL_ID = 'kubeconfig-file'
+    KUBECONFIG_CREDENTIAL_ID = 'kubeconfig-text'
     REGISTRY = 'docker.io'
     DOCKERHUB_NAMESPACE = 'dleastsun01'
     GITHUB_ACCOUNT = 'dleastsun'
@@ -65,10 +65,12 @@ pipeline {
       }
       steps {
         input message: 'deploy to dev?', ok: 'Proceed'
-        withCredentials([file(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG_FILE')]) {
+        withCredentials([string(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBE_RAW')]) {
           sh '''
             set -e
-            export KUBECONFIG=${KUBECONFIG_FILE}
+            # 写入临时kubeconfig文件
+            echo "${KUBE_RAW}" > ./kubeconfig.tmp
+            export KUBECONFIG=./kubeconfig.tmp
             echo "===== 开始替换变量并应用dev资源 ====="
             envsubst < deploy/dev-ol/*.yaml | kubectl apply -f -
             echo "===== 等待deployment滚动就绪 ====="
@@ -108,10 +110,11 @@ pipeline {
       }
       steps {
         input message: 'deploy to production?', ok: 'Proceed'
-        withCredentials([file(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG_FILE')]) {
+        withCredentials([string(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBE_RAW')]) {
           sh '''
             set -e
-            export KUBECONFIG=${KUBECONFIG_FILE}
+            echo "${KUBE_RAW}" > ./kubeconfig.tmp
+            export KUBECONFIG=./kubeconfig.tmp
             echo "===== 开始替换变量并应用prod资源 ====="
             envsubst < deploy/prod-ol/*.yaml | kubectl apply -f -
             echo "===== 等待deployment滚动就绪 ====="
