@@ -27,11 +27,11 @@ pipeline {
           git config --global http.sslVerify false
           git config --global http.postBuffer 524288000
           git config --global core.gitProxy ""
+          git config --global http.timeout 300
         '''
         checkout scm
       }
     }
-
     stage('Unit Test') {
       steps {
         container('maven') {
@@ -39,7 +39,6 @@ pipeline {
         }
       }
     }
-
     stage('Build Snapshot Image') {
       steps {
         container('maven') {
@@ -50,7 +49,6 @@ pipeline {
         }
       }
     }
-
     stage('Push Latest Tag (Master Only)') {
       when {
         branch 'master'
@@ -61,7 +59,6 @@ pipeline {
         }
       }
     }
-
     stage('Deploy To Dev') {
       when {
         branch 'master'
@@ -75,12 +72,11 @@ pipeline {
             echo "===== 开始替换变量并应用dev资源 ====="
             envsubst < deploy/dev-ol/*.yaml | kubectl apply -f -
             echo "===== 等待deployment滚动就绪 ====="
-            kubectl rollout status deploy -n default --timeout=180s
+            kubectl rollout status deployment/${APP_NAME} -n default --timeout=180s
           '''
         }
       }
     }
-
     stage('Push Git Release Tag') {
       when {
         expression { params.TAG_NAME =~ /^v.+/ }
@@ -106,7 +102,6 @@ pipeline {
         }
       }
     }
-
     stage('Deploy To Production') {
       when {
         expression { params.TAG_NAME =~ /^v.+/ }
@@ -120,13 +115,12 @@ pipeline {
             echo "===== 开始替换变量并应用prod资源 ====="
             envsubst < deploy/prod-ol/*.yaml | kubectl apply -f -
             echo "===== 等待deployment滚动就绪 ====="
-            kubectl rollout status deploy -n default --timeout=180s
+            kubectl rollout status deployment/${APP_NAME} -n default --timeout=180s
           '''
         }
       }
     }
   }
-
   post {
     always {
       script {
