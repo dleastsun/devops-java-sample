@@ -4,11 +4,9 @@ pipeline {
       label 'maven'
     }
   }
-
   parameters {
     string(name:'TAG_NAME', defaultValue: '', description:'发布版本号，例如 v1.0.0 (留空则不发布正式版)')
   }
-
   environment {
     DOCKER_CREDENTIAL_ID = 'dockerhub-id'
     GITHUB_CREDENTIAL_ID = 'github-id'
@@ -19,18 +17,14 @@ pipeline {
     APP_NAME = 'devops-java-sample'
     SONAR_CREDENTIAL_ID = 'sonar-qube'
   }
-
   stages {
     stage ('checkout scm') {
       steps {
-        // 【修复1】在拉取代码前，强制 Git 使用 IPv4 并关闭 SSL 验证（如果是内网代理导致的证书问题）
-        // 注意：生产环境建议修复容器 CA 证书，而不是关闭 SSL 验证
         sh 'git config --global http.sslVerify false'
         sh 'git config --global --add core.gitProxy ""'
         checkout(scm)
       }
     }
-
     stage ('unit test') {
       steps {
         container ('maven') {
@@ -43,11 +37,10 @@ pipeline {
       steps {
         container ('maven') {
           sh 'mvn -Dmaven.test.skip=true -gs `pwd`/configuration/settings.xml clean package'
-          sh 'docker build -f Dockerfile-online -t $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:SNAPSHOT-$BRANCH_NAME-$BUILD_NUMBER .'
+          sh 'docker build --pull=false -f Dockerfile-online -t $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:SNAPSHOT-$BRANCH_NAME-$BUILD_NUMBER .'
         }
       }
     }
-
     stage('push latest'){
        when{
          branch 'master'
@@ -58,17 +51,19 @@ pipeline {
             }
        }
     }
-
     stage('deploy to dev') {
       when{
         branch 'master'
       }
       steps {
         input(id: 'deploy-to-dev', message: 'deploy to dev?')
-        kubernetesDeploy(configs: 'deploy/dev-ol/**', enableConfigSubstitution: true, kubeconfigId: "$KUBECONFIG_CREDENTIAL_ID")
+        withCredentials([kubeconfigFile(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG')]) {
+          sh """
+            envsubst < deploy/dev-ol/*.yaml | kubectl apply -f -
+          """
+        }
       }
     }
-
     stage('push with tag'){
       when{
         expression{
@@ -81,17 +76,14 @@ pipeline {
             withCredentials([usernamePassword(credentialsId: "$GITHUB_CREDENTIAL_ID", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
               sh 'git config --global user.email "kubesphere@yunify.com" '
               sh 'git config --global user.name "kubesphere" '
-              // 【修复2】强制使用 IPv4，防止 gnutls_handshake 失败
               sh 'git config --global --add url."https://".insteadOf git://'
               sh 'git tag -a $TAG_NAME -m "$TAG_NAME" '
-              // 【修复3】使用更安全的方式推送，避免密码在进程参数中明文暴露（虽然 Jenkins 会脱敏日志）
               sh 'git remote set-url origin http://$GIT_USERNAME:$GIT_PASSWORD@github.com/$GITHUB_ACCOUNT/devops-java-sample.git'
               sh 'git push origin --tags --ipv4'
             }
       }
       }
     }
-
     stage('deploy to production') {
       when{
         expression{
@@ -100,19 +92,20 @@ pipeline {
       }
       steps {
         input(id: 'deploy-to-production', message: 'deploy to production?')
-        kubernetesDeploy(configs: 'deploy/prod-ol/**', enableConfigSubstitution: true, kubeconfigId: "$KUBECONFIG_CREDENTIAL_ID")
+        withCredentials([kubeconfigFile(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG')]) {
+          sh """
+            envsubst < deploy/prod-ol/*.yaml | kubectl apply -f -
+          """
+        }
       }
     }
   }
-
-  // 【优化】增加 post 块，构建结束后清理工作空间，防止磁盘占满
   post {
     always {
       cleanWs()
     }
     failure {
       echo "流水线执行失败，请检查日志！"
-      // 这里可以添加钉钉/邮件通知逻辑
     }
   }
 }
