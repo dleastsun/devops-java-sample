@@ -22,6 +22,7 @@ pipeline {
       steps {
         sh 'git config --global http.sslVerify false'
         sh 'git config --global --add core.gitProxy ""'
+        sh 'git config --global http.postBuffer 524288000'
         checkout(scm)
       }
     }
@@ -32,7 +33,7 @@ pipeline {
         }
       }
     }
- 
+
     stage ('build & push') {
       steps {
         container ('maven') {
@@ -47,7 +48,7 @@ pipeline {
        }
        steps{
             container ('maven') {
-              
+
             }
        }
     }
@@ -102,7 +103,11 @@ pipeline {
   }
   post {
     always {
-      cleanWs()
+      script {
+        if (env.BUILD_NUMBER && env.NODE_NAME) {
+          cleanWs()
+        }
+      }
     }
     failure {
       echo "流水线执行失败，请检查日志！"
