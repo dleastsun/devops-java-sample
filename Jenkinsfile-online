@@ -11,11 +11,13 @@ pipeline {
 
     environment {
         DOCKER_CREDENTIAL_ID = 'dockerhub-id'
-        GITHUB_CREDENTIAL_ID = 'github-id'
+        // [改动1] 凭据ID改为gitlab对应的，你需要在Jenkins凭据管理里新建一个ID为'gitlab-id'的凭据
+        GITLAB_CREDENTIAL_ID = 'gitlab-id'
         KUBECONFIG_CREDENTIAL_ID = 'kubeconfig2'
         REGISTRY = '10.0.2.4:5000'
         DOCKERHUB_NAMESPACE = 'kubesphere-sample'
-        GITHUB_ACCOUNT = 'dleastsun'
+        // [改动2] 账号从github的'dleastsun'改为gitlab的'root'
+        GITLAB_ACCOUNT = 'root'
         APP_NAME = 'devops-java-sample'
         SONAR_CREDENTIAL_ID = 'sonar-qube'
     }
@@ -78,11 +80,12 @@ pipeline {
           steps {
               container ('maven') {
                 input(id: 'release-image-with-tag', message: 'release image with tag?')
-                  withCredentials([usernamePassword(credentialsId: "$GITHUB_CREDENTIAL_ID", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                  withCredentials([usernamePassword(credentialsId: "$GITLAB_CREDENTIAL_ID", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
                     sh 'git config --global user.email "kubesphere@yunify.com" '
                     sh 'git config --global user.name "kubesphere" '
                     sh 'git tag -a $TAG_NAME -m "$TAG_NAME" '
-                    sh 'git push http://$GIT_USERNAME:$GIT_PASSWORD@github.com/$GITHUB_ACCOUNT/devops-java-sample.git --tags --ipv4'
+                    // [改动3] github.com 改为本地GitLab地址10.0.2.15，账号改为root
+                    sh 'git push http://$GIT_USERNAME:$GIT_PASSWORD@10.0.2.15/$GITLAB_ACCOUNT/devops-java-sample.git --tags --ipv4'
                   }
                 sh 'docker tag  $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:SNAPSHOT-$BRANCH_NAME-$BUILD_NUMBER $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:$TAG_NAME '
                 sh 'docker push  $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:$TAG_NAME '
