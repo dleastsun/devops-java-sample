@@ -28,7 +28,7 @@ spec:
               value: js|html
             - name: CACHE_PUBLIC_EXPIRATION
               value: 3d
-          image: $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:SNAPSHOT-$BRANCH_NAME-$BUILD_NUMBER
+          image: 192.168.56.100:5000/devops-java-sample:SNAPSHOT-master-1
           readinessProbe:
             httpGet:
               path: /
