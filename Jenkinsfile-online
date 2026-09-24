@@ -14,7 +14,7 @@ pipeline {
         GITHUB_CREDENTIAL_ID = 'github-id'
         KUBECONFIG_CREDENTIAL_ID = 'kubeconfig2'
         REGISTRY = '192.168.56.100:5000'
-        DOCKERHUB_NAMESPACE = ''
+        DOCKERHUB_NAMESPACE = 'kubesphere-sample'
         GITHUB_ACCOUNT = 'dleastsun'
         APP_NAME = 'devops-java-sample'
         SONAR_CREDENTIAL_ID = 'sonar-qube'
@@ -34,7 +34,7 @@ pipeline {
                 }
             }
         }
- 
+
         stage ('build & push') {
             steps {
                 container ('maven') {
