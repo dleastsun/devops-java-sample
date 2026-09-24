@@ -28,7 +28,7 @@ spec:
               value: js|html
             - name: CACHE_PUBLIC_EXPIRATION
               value: 3d
-          image: 192.168.56.100:5000/devops-java-sample:SNAPSHOT-master-1
+          image: 10.0.2.4:5000/devops-java-sample:SNAPSHOT-master-1
           readinessProbe:
             httpGet:
               path: /
