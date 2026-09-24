@@ -13,7 +13,7 @@ pipeline {
         DOCKER_CREDENTIAL_ID = 'dockerhub-id'
         GITHUB_CREDENTIAL_ID = 'github-id'
         KUBECONFIG_CREDENTIAL_ID = 'kubeconfig2'
-        REGISTRY = '192.168.56.100:5000'
+        REGISTRY = '10.0.2.4:5000'
         DOCKERHUB_NAMESPACE = 'kubesphere-sample'
         GITHUB_ACCOUNT = 'dleastsun'
         APP_NAME = 'devops-java-sample'
