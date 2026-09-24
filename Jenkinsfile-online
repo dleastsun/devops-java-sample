@@ -4,136 +4,95 @@ pipeline {
       label 'maven'
     }
   }
-  parameters {
-    string(name: 'TAG_NAME', defaultValue: '', description: '版本标签，v1.0.0格式，留空不发布生产')
-  }
-  environment {
-    DOCKER_CREDENTIAL_ID = 'dockerhub-id'
-    GITHUB_CREDENTIAL_ID = 'github-id'
-    KUBECONFIG_CREDENTIAL_ID = 'kubeconfig-text'
-    REGISTRY = 'docker.io'
-    DOCKERHUB_NAMESPACE = 'dleastsun01'
-    GITHUB_ACCOUNT = 'dleastsun'
-    APP_NAME = 'devops-java-sample'
-    SONAR_CREDENTIAL_ID = 'sonar-qube'
-  }
-  options {
-    timeout(time: 20, unit: 'MINUTES')
-  }
-  stages {
-    stage('Checkout SCM') {
-      steps {
-        sh '''
-          git config --global http.sslVerify false
-          git config --global http.postBuffer 524288000
-          git config --global core.gitProxy ""
-          git config --global http.timeout 300
-        '''
-        checkout scm
-      }
+
+    parameters {
+        string(name:'TAG_NAME',defaultValue: '',description:'')
     }
-    stage('Unit Test') {
-      steps {
-        container('maven') {
-          sh 'mvn clean -gs `pwd`/configuration/settings.xml test'
+
+    environment {
+        DOCKER_CREDENTIAL_ID = 'dockerhub-id'
+        GITHUB_CREDENTIAL_ID = 'github-id'
+        KUBECONFIG_CREDENTIAL_ID = 'kubeconfig2'
+        REGISTRY = 'docker.io'
+        DOCKERHUB_NAMESPACE = 'dleastsun01'
+        GITHUB_ACCOUNT = 'dleastsun'
+        APP_NAME = 'devops-java-sample'
+        SONAR_CREDENTIAL_ID = 'sonar-qube'
+    }
+
+    stages {
+        stage ('checkout scm') {
+            steps {
+                checkout(scm)
+            }
         }
-      }
-    }
-    stage('Build Snapshot Image') {
-      steps {
-        container('maven') {
-          sh '''
-            mvn -Dmaven.test.skip=true -gs `pwd`/configuration/settings.xml clean package
-            docker build --pull=false -f Dockerfile-online -t ${REGISTRY}/${DOCKERHUB_NAMESPACE}/${APP_NAME}:SNAPSHOT-${BRANCH_NAME}-${BUILD_NUMBER} .
-          '''
+
+        stage ('unit test') {
+            steps {
+                container ('maven') {
+                    sh 'mvn clean  -gs `pwd`/configuration/settings.xml test'
+                }
+            }
         }
-      }
-    }
-    stage('Push Latest Tag (Master Only)') {
-      when {
-        branch 'master'
-      }
-      steps {
-        container('maven') {
-          // 如需docker tag && push latest镜像，在这里补充
+ 
+        stage ('build & push') {
+            steps {
+                container ('maven') {
+                    sh 'mvn  -Dmaven.test.skip=true -gs `pwd`/configuration/settings.xml clean package'
+                    sh 'docker build -f Dockerfile-online -t $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:SNAPSHOT-$BRANCH_NAME-$BUILD_NUMBER .'
+                }
+            }
         }
-      }
-    }
-    stage('Deploy To Dev') {
-      when {
-        branch 'master'
-      }
-      steps {
-        input message: 'deploy to dev?', ok: 'Proceed'
-        withCredentials([string(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBE_RAW')]) {
-          sh '''
-            set -e
-            # 写入临时kubeconfig文件
-            echo "${KUBE_RAW}" > ./kubeconfig.tmp
-            export KUBECONFIG=./kubeconfig.tmp
-            echo "===== 开始替换变量并应用dev资源 ====="
-            envsubst < deploy/dev-ol/*.yaml | kubectl apply -f -
-            echo "===== 等待deployment滚动就绪 ====="
-            kubectl rollout status deployment/${APP_NAME} -n default --timeout=180s
-          '''
+
+        stage('push latest'){
+           when{
+             branch 'master'
+           }
+           steps{
+                container ('maven') {
+                 
+                }
+           }
         }
-      }
-    }
-    stage('Push Git Release Tag') {
-      when {
-        expression { params.TAG_NAME =~ /^v.+/ }
-      }
-      steps {
-        container('maven') {
-          input message: 'release image with tag?', ok: 'Proceed'
-          withCredentials([usernamePassword(
-            credentialsId: "${GITHUB_CREDENTIAL_ID}",
-            usernameVariable: 'GIT_USERNAME',
-            passwordVariable: 'GIT_PASSWORD'
-          )]) {
-            sh '''
-              set -e
-              git config --global user.email "kubesphere@yunify.com"
-              git config --global user.name "kubesphere"
-              git config --global url."https://".insteadOf git://
-              git tag -a ${TAG_NAME} -m ${TAG_NAME}
-              git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${GITHUB_ACCOUNT}/devops-java-sample.git
-              git push origin --tags
-            '''
+
+        stage('deploy to dev') {
+          when{
+            branch 'master'
+          }
+          steps {
+            input(id: 'deploy-to-dev', message: 'deploy to dev?')
+            kubernetesDeploy(configs: 'deploy/dev-ol/**', enableConfigSubstitution: true, kubeconfigId: "$KUBECONFIG_CREDENTIAL_ID")
           }
         }
-      }
-    }
-    stage('Deploy To Production') {
-      when {
-        expression { params.TAG_NAME =~ /^v.+/ }
-      }
-      steps {
-        input message: 'deploy to production?', ok: 'Proceed'
-        withCredentials([string(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBE_RAW')]) {
-          sh '''
-            set -e
-            echo "${KUBE_RAW}" > ./kubeconfig.tmp
-            export KUBECONFIG=./kubeconfig.tmp
-            echo "===== 开始替换变量并应用prod资源 ====="
-            envsubst < deploy/prod-ol/*.yaml | kubectl apply -f -
-            echo "===== 等待deployment滚动就绪 ====="
-            kubectl rollout status deployment/${APP_NAME} -n default --timeout=180s
-          '''
+        stage('push with tag'){
+          when{
+            expression{
+              return params.TAG_NAME =~ /v.*/
+            }
+          }
+          steps {
+              container ('maven') {
+                input(id: 'release-image-with-tag', message: 'release image with tag?')
+                  withCredentials([usernamePassword(credentialsId: "$GITHUB_CREDENTIAL_ID", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                    sh 'git config --global user.email "kubesphere@yunify.com" '
+                    sh 'git config --global user.name "kubesphere" '
+                    sh 'git tag -a $TAG_NAME -m "$TAG_NAME" '
+                    sh 'git push http://$GIT_USERNAME:$GIT_PASSWORD@github.com/$GITHUB_ACCOUNT/devops-java-sample.git --tags --ipv4'
+                  }
+                
+          }
+          }
         }
-      }
-    }
-  }
-  post {
-    always {
-      script {
-        if (env.NODE_NAME && env.BUILD_NUMBER) {
-          cleanWs()
+        stage('deploy to production') {
+          when{
+            expression{
+              return params.TAG_NAME =~ /v.*/
+            }
+          }
+          steps {
+            input(id: 'deploy-to-production', message: 'deploy to production?')
+            kubernetesDeploy(configs: 'deploy/prod-ol/**', enableConfigSubstitution: true, kubeconfigId: "$KUBECONFIG_CREDENTIAL_ID")
+          }
         }
-      }
     }
-    failure {
-      echo "流水线执行失败，请检查日志！"
-    }
-  }
 }
