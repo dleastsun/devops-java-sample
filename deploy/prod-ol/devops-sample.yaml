@@ -33,7 +33,7 @@ spec:
               value: js|html
             - name: CACHE_PUBLIC_EXPIRATION
               value: 3d
-          image: 10.0.2.4:5000/devops-java-sample:v1.0.0
+          image: $REGISTRY/$DOCKERHUB_NAMESPACE/$APP_NAME:$TAG_NAME
           readinessProbe:
             httpGet:
               path: /
